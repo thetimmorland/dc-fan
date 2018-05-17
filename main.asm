@@ -24,7 +24,7 @@
 #define USART_UBRR int(F_CPU / 16 / USART_BAUD - 1)
 
 ;
-; General Data Registers
+; GENERAL VARIABLE REGISTERS
 ;
 
 .def count = r2
@@ -50,6 +50,13 @@ rjmp TIM1_OVF
 rjmp TIM1_IC
 
 .org INT_VECTORS_SIZE
+
+;
+; CONSTANT DATA
+;
+
+greeting:
+.db "Hello World!", '\n', '\0'
 
 ;
 ; INTERUPT HANDLERS
@@ -106,13 +113,10 @@ reset:
 	sei
 
 loop:
-	; send adc reading
-	lds r25, ADCH
-	rcall USART_Transmit
+	ldi zl, LOW(greeting<<1)
+	ldi zh, HIGH(greeting<<1)
 
-	; send fan frequency
-	mov r25, freq
-	rcall USART_Transmit
+	rcall USART_Transmit_Str
 
 	rjmp loop
 
@@ -199,12 +203,12 @@ USART_Init:
 	sts UBRR0H, r17
 	sts UBRR0L, r16
 
-	; enable receiver and transmitter
+	; enable transmit
 	ldi r16, (1<<TXEN0)
 		sts UCSR0B, r16
 
 	; set frame format: 8data, 1 stop bit
-	ldi r16, (3<<UCSZ00)
+	ldi r16, (1<<UCSZ01)|(1<<UCSZ00)
 		sts UCSR0C, r16
 
 	ret
@@ -213,12 +217,24 @@ USART_Init:
 ; SUBROUTINES
 ;
 
-USART_Transmit:
+USART_Transmit_Str:
+	lpm r25, z+
+	tst r25
+		breq return
+
+	rcall USART_Transmit_Char
+	rjmp USART_Transmit_Str
+
+return:
+	ret
+
+USART_Transmit_Char:
 	lds r16, UCSR0A
 	sbrs r16, UDRE0
-		rjmp USART_Transmit
+		rjmp USART_Transmit_Char
 
 	; Put data into buffer, sends the data
 	sts UDR0, r25
 
 	ret
+
