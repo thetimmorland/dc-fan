@@ -22,13 +22,15 @@
 ; serial communication
 #define USART_BAUD 9600
 #define USART_UBRR int(F_CPU / 16 / USART_BAUD - 1)
+#define OFFSET 65
 
 ;
 ; GENERAL VARIABLE REGISTERS
 ;
 
-.def count = r2
+.def pulse_count = r2
 .def freq = r3
+.def diff = r4
 
 ;
 ; INTERRUPT VECTOR TABLE
@@ -54,6 +56,9 @@ rjmp TIM1_IC
 ;
 ; CONSTANT DATA
 ;
+
+rpm_table:
+.db 30, 30, 30, 40, 66, 90, 113, 135, 150, 160
 
 greeting:
 .db "Hello World!", '\n', '\0'
@@ -81,21 +86,37 @@ ADC_Complete:
 
 	reti
 
+; DO NOT DELETE! this empty interupt clears TIM0_OVF flag to re-trigger adc
 TIM0_OVF:
-	; DO NOT DELETE! this empty interupt clears TIM0_OVF flag to re-trigger adc
 	reti
 
 TIM1_OVF:
-	; divide count by two to account for fan giving two signals per cycle
-	lsr count
-	mov freq, count
-	clr count
+	mov freq, pulse_count
+	clr pulse_count
+
+	ldi r16, OFFSET
+	add r16, freq
+	mov diff, r16
+
+	lds r16, OCR2B
+		lsr r16
+		lsr r16
+		lsr r16
+
+	ldi zl, LOW(rpm_table<<1)
+	ldi zh, HIGH(rpm_table<<1)
+		add zl, r16
+		clr r16
+		adc zh, r16
+
+	lpm r16, z
+		sub diff, r16
 
 	reti
 
 TIM1_IC:
 	; record input capture
-	inc count
+	inc pulse_count
 	reti
 
 ;
@@ -113,13 +134,10 @@ reset:
 	sei
 
 loop:
-	ldi zl, LOW(greeting<<1)
-	ldi zh, HIGH(greeting<<1)
-
-	rcall USART_Transmit_Str
+	mov r25, diff
+	rcall USART_Transmit_Char
 
 	rjmp loop
-
 
 ;
 ; INIT
@@ -219,6 +237,8 @@ USART_Init:
 
 USART_Transmit_Str:
 	lpm r25, z+
+
+	; test for null character
 	tst r25
 		breq return
 
@@ -229,12 +249,12 @@ return:
 	ret
 
 USART_Transmit_Char:
+	; block until previous transmission finishes
 	lds r16, UCSR0A
 	sbrs r16, UDRE0
 		rjmp USART_Transmit_Char
 
-	; Put data into buffer, sends the data
+	; put data into buffer, sends the data
 	sts UDR0, r25
 
 	ret
-
